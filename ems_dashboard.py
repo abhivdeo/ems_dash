@@ -544,6 +544,43 @@ if (generate or auto_run) and can_run:
 
     st.divider()
 
+# Chart
+    st.subheader("📊 Interactive Energy Chart 2")
+    SIGNALS = ["Grid Available","Tariff","Battery SOC (%)"]
+    COLORS  = ["#2196F3","#8BC34A"]
+
+    cc1,cc2 = st.columns(2)
+    with cc1:
+        pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
+                             default=["Grid Available","Tariff""Tariff"])
+    with cc2:
+        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"])
+
+    if pri or sec:
+        fig = make_subplots(specs=[[{"secondary_y":True}]])
+        x = df_result["Time"].tolist(); ci=0
+        for s in pri:
+            if s in df_result.columns:
+                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s,
+                    line=dict(color=COLORS[ci%len(COLORS)],width=2), mode="lines"),
+                    secondary_y=False); ci+=1
+        for s in sec:
+            if s in df_result.columns:
+                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s+" (R)",
+                    line=dict(color=COLORS[ci%len(COLORS)],width=2,dash="dot"), mode="lines"),
+                    secondary_y=True); ci+=1
+        fig.update_layout(height=500, template="plotly_dark", hovermode="x unified",
+            legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1),
+            margin=dict(l=40,r=40,t=40,b=60),
+            xaxis=dict(title="Time",tickangle=-45,tickmode="auto",nticks=24))
+        fig.update_yaxes(title_text="Power (kW)", secondary_y=False)
+        fig.update_yaxes(title_text="SOC (%)",    secondary_y=True)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Select at least one signal above to plot.")
+
+    st.divider()
+    
     # Output table
     st.subheader("📋 EMS Output Table")
     DCOLS = ["Time","Battery SOC (%)","RE (kW)","Load (kW)","Grid Available","Tariff",
