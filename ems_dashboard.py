@@ -552,7 +552,7 @@ if (generate or auto_run) and can_run:
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
-                             default=["Grid Available","Tariff""Tariff"])
+                             default=["Grid Available","Tariff"])
     with cc2:
         sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"])
 
