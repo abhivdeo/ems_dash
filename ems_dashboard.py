@@ -546,15 +546,15 @@ if (generate or auto_run) and can_run:
 
 # Chart
     st.subheader("📊 Interactive Energy Chart 2")
-    SIGNALS = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Battery SOC (%)","Grid Available","Tariff"]
-    COLORS  = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A","#FF9800","#E91E63"]
+    SIGNALS = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Grid Available","Tariff"]
+    COLORS  = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A","#E91E63"]
 
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
                              default=["Grid Available","Tariff"])
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)","Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)"])
+        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)"])
 
     if pri or sec:
         fig = make_subplots(specs=[[{"secondary_y":True}]])
