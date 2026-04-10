@@ -382,9 +382,9 @@ if (generate or auto_run) and can_run:
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
-                             default=["Load (kW)","RE (kW)","Load_out (kW)","Grid_out (kW)"])
+                             default=["Battery SOC (%)"])
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"])
+        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Load (kW)","RE (kW)","Grid_out (kW)"])
 
     if pri or sec:
         fig = make_subplots(specs=[[{"secondary_y":True}]])
