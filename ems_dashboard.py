@@ -573,8 +573,8 @@ if (generate or auto_run) and can_run:
             legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1),
             margin=dict(l=40,r=40,t=40,b=60),
             xaxis=dict(title="Time",tickangle=-45,tickmode="auto",nticks=24))
-        fig.update_yaxes(title_text="Power (kW)", secondary_y=False)
-        fig.update_yaxes(title_text="SOC (%)",    secondary_y=True)
+        fig.update_yaxes(title_text="0/1", secondary_y=False)
+        fig.update_yaxes(title_text="Power (kW)",    secondary_y=True)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Select at least one signal above to plot.")
