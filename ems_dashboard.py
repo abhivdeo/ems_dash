@@ -365,12 +365,145 @@ if (generate or auto_run) and can_run:
     )
 
     # KPIs
-    k1,k2,k3,k4,k5 = st.columns(5)
-    k1.metric("Total Load",      f"{df_result['Load_out (kW)'].sum():.2f} kWh")
-    k2.metric("RE Generation",   f"{df_result['RE (kW)'].sum():.2f} kWh")
-    k3.metric("Grid Import",     f"{df_result[df_result['Grid_out (kW)']>0]['Grid_out (kW)'].sum():.2f} kWh")
-    k4.metric("Grid Export",     f"{abs(df_result[df_result['Grid_out (kW)']<0]['Grid_out (kW)'].sum()):.2f} kWh")
-    k5.metric("Batt Net",        f"{df_result['Batt_out (kW)'].sum():+.2f} kWh")
+    total_load   = df_result['Load_out (kW)'].sum()
+    re_gen       = df_result['RE (kW)'].sum()
+    grid_import  = df_result[df_result['Grid_out (kW)']>0]['Grid_out (kW)'].sum()
+    grid_export  = abs(df_result[df_result['Grid_out (kW)']<0]['Grid_out (kW)'].sum())
+    batt_net     = df_result['Batt_out (kW)'].sum()
+    re_pct       = (re_gen / total_load * 100) if total_load > 0 else 0
+    self_suf     = max(0, min(100, (total_load - grid_import) / total_load * 100)) if total_load > 0 else 0
+
+    kpi_html = f"""
+    <style>
+    .kpi-grid {{
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+        margin-bottom: 8px;
+    }}
+    .kpi-card {{
+        background: #1e2130;
+        border: 1px solid #2e3250;
+        border-radius: 10px;
+        padding: 14px 16px;
+        text-align: center;
+        position: relative;
+        cursor: default;
+        transition: border-color 0.2s, transform 0.15s;
+    }}
+    .kpi-card:hover {{
+        border-color: #4a90e2;
+        transform: translateY(-2px);
+    }}
+    .kpi-card:hover .kpi-tooltip {{
+        opacity: 1;
+        pointer-events: auto;
+    }}
+    .kpi-icon  {{ font-size: 20px; margin-bottom: 4px; }}
+    .kpi-label {{ font-size: 11px; color: #8a9bb0; text-transform: uppercase;
+                  letter-spacing: .06em; margin-bottom: 6px; }}
+    .kpi-value {{ font-size: 22px; font-weight: 700; color: #e8edf5;
+                  white-space: nowrap; overflow: visible; }}
+    .kpi-sub   {{ font-size: 11px; color: #5a7a9a; margin-top: 4px; }}
+    .kpi-tooltip {{
+        opacity: 0;
+        pointer-events: none;
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%; transform: translateX(-50%);
+        background: #0d1117;
+        border: 1px solid #4a90e2;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 12px;
+        color: #cdd9e5;
+        white-space: nowrap;
+        z-index: 999;
+        transition: opacity 0.2s;
+        text-align: left;
+        line-height: 1.7;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }}
+    .kpi-tooltip::after {{
+        content: '';
+        position: absolute;
+        top: 100%; left: 50%; transform: translateX(-50%);
+        border: 6px solid transparent;
+        border-top-color: #4a90e2;
+    }}
+    </style>
+
+    <div class="kpi-grid">
+
+      <div class="kpi-card">
+        <div class="kpi-icon">⚡</div>
+        <div class="kpi-label">Total Load</div>
+        <div class="kpi-value">{total_load:.1f} kWh</div>
+        <div class="kpi-sub">Site consumption</div>
+        <div class="kpi-tooltip">
+          <b>Total Load</b><br>
+          Exact: {total_load:.3f} kWh<br>
+          Rows: {len(df_result)}<br>
+          Avg per row: {total_load/len(df_result):.3f} kW
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon">☀️</div>
+        <div class="kpi-label">RE Generation</div>
+        <div class="kpi-value">{re_gen:.1f} kWh</div>
+        <div class="kpi-sub">{re_pct:.1f}% of load</div>
+        <div class="kpi-tooltip">
+          <b>Renewable Generation</b><br>
+          Exact: {re_gen:.3f} kWh<br>
+          RE coverage: {re_pct:.2f}%<br>
+          Self-sufficiency: {self_suf:.1f}%
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon">🔌</div>
+        <div class="kpi-label">Grid Import</div>
+        <div class="kpi-value">{grid_import:.1f} kWh</div>
+        <div class="kpi-sub">{grid_import/total_load*100 if total_load else 0:.1f}% of load</div>
+        <div class="kpi-tooltip">
+          <b>Grid Import</b><br>
+          Exact: {grid_import:.3f} kWh<br>
+          Share of load: {grid_import/total_load*100 if total_load else 0:.2f}%<br>
+          Net (import−export): {grid_import - grid_export:+.2f} kWh
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon">📤</div>
+        <div class="kpi-label">Grid Export</div>
+        <div class="kpi-value">{grid_export:.1f} kWh</div>
+        <div class="kpi-sub">Excess RE to grid</div>
+        <div class="kpi-tooltip">
+          <b>Grid Export</b><br>
+          Exact: {grid_export:.3f} kWh<br>
+          Net grid position: {grid_import - grid_export:+.3f} kWh<br>
+          {'Net importer ↑' if grid_import > grid_export else 'Net exporter ↓'}
+        </div>
+      </div>
+
+      <div class="kpi-card">
+        <div class="kpi-icon">🔋</div>
+        <div class="kpi-label">Batt Net</div>
+        <div class="kpi-value" style="color:{'#4CAF50' if batt_net>=0 else '#FF7043'}">{batt_net:+.1f} kWh</div>
+        <div class="kpi-sub">{'Net charging ↑' if batt_net>=0 else 'Net discharging ↓'}</div>
+        <div class="kpi-tooltip">
+          <b>Battery Net Energy</b><br>
+          Exact: {batt_net:+.3f} kWh<br>
+          + = net charge &nbsp; − = net discharge<br>
+          Charge rows: {(df_result['Batt Mode']=='Charge').sum()}<br>
+          Discharge rows: {(df_result['Batt Mode']=='Discharge').sum()}
+        </div>
+      </div>
+
+    </div>
+    """
+    st.html(kpi_html)
 
     st.divider()
 
@@ -382,9 +515,9 @@ if (generate or auto_run) and can_run:
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
-                             default=["Battery SOC (%)"])
+                             default=["Load (kW)","RE (kW)","Load_out (kW)","Grid_out (kW)"])
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Load (kW)","RE (kW)","Grid_out (kW)"])
+        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"])
 
     if pri or sec:
         fig = make_subplots(specs=[[{"secondary_y":True}]])
