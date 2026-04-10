@@ -547,7 +547,7 @@ if (generate or auto_run) and can_run:
 # Chart
     st.subheader("📊 Interactive Energy Chart 2")
     SIGNALS = ["Grid Available","Tariff","Battery SOC (%)"]
-    COLORS  = ["#2196F3","#8BC34A"]
+    COLORS  = ["#2196F3","#8BC34A","#9C27B0"]
 
     cc1,cc2 = st.columns(2)
     with cc1:
