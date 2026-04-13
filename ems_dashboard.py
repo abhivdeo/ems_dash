@@ -277,7 +277,7 @@ def process_dataframe(df, rules):
 #  UI
 # ══════════════════════════════════════════════════════════════
 
-st.title("⚡ Energy Management System Dashboard 1324")
+st.title("⚡ Energy Management System Dashboard")
 st.caption("Upload your rules & input data — or download the sample templates and use them to get started instantly.")
 
 # ── Sidebar ────────────────────────────────────────────────────
@@ -551,37 +551,66 @@ if "df_result" in st.session_state:
 
     st.divider()
 
-    # Chart
-    st.subheader("📊 Interactive Energy Chart")
-    SIGNALS = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Battery SOC (%)"]
-    COLORS  = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A"]
+    # ── Shared time-range slider ───────────────────────────────
+    time_vals = df_result["Time"].tolist()
+    n_pts     = len(time_vals)
 
-    cc1,cc2 = st.columns(2)
+    # Build slider only when there are enough points
+    if n_pts > 1:
+        sl_col1, sl_col2 = st.columns([1, 3])
+        with sl_col1:
+            st.markdown("**🕐 Time Window**")
+        with sl_col2:
+            t_range = st.slider(
+                "Time range",
+                min_value=0, max_value=n_pts - 1,
+                value=(0, n_pts - 1),
+                key="time_slider",
+                label_visibility="collapsed",
+            )
+        t_start, t_end = t_range
+        # Show human-readable labels
+        st.caption(f"Showing **{time_vals[t_start]}** → **{time_vals[t_end]}**  ({t_end - t_start + 1} of {n_pts} points)")
+    else:
+        t_start, t_end = 0, n_pts - 1
+
+    # Slice data to selected window
+    df_slice = df_result.iloc[t_start : t_end + 1]
+    x_slice  = df_slice["Time"].tolist()
+
+    st.divider()
+
+    # ── Chart 1 ────────────────────────────────────────────────
+    st.subheader("📊 Interactive Energy Chart")
+    SIGNALS1 = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Battery SOC (%)"]
+    COLORS   = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A"]
+
+    cc1, cc2 = st.columns(2)
     with cc1:
-        pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
+        pri = st.multiselect("Primary Y-axis (kW)", SIGNALS1,
                              default=["Load (kW)","RE (kW)","Load_out (kW)","Grid_out (kW)"],
                              key="chart1_pri")
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"],
+        sec = st.multiselect("Secondary Y-axis", SIGNALS1, default=["Battery SOC (%)"],
                              key="chart1_sec")
 
     if pri or sec:
-        fig = make_subplots(specs=[[{"secondary_y":True}]])
-        x = df_result["Time"].tolist(); ci=0
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        ci = 0
         for s in pri:
-            if s in df_result.columns:
-                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s,
-                    line=dict(color=COLORS[ci%len(COLORS)],width=2), mode="lines"),
-                    secondary_y=False); ci+=1
+            if s in df_slice.columns:
+                fig.add_trace(go.Scatter(x=x_slice, y=df_slice[s].tolist(), name=s,
+                    line=dict(color=COLORS[ci % len(COLORS)], width=2), mode="lines"),
+                    secondary_y=False); ci += 1
         for s in sec:
-            if s in df_result.columns:
-                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s+" (R)",
-                    line=dict(color=COLORS[ci%len(COLORS)],width=2,dash="dot"), mode="lines"),
-                    secondary_y=True); ci+=1
+            if s in df_slice.columns:
+                fig.add_trace(go.Scatter(x=x_slice, y=df_slice[s].tolist(), name=s + " (R)",
+                    line=dict(color=COLORS[ci % len(COLORS)], width=2, dash="dot"), mode="lines"),
+                    secondary_y=True); ci += 1
         fig.update_layout(height=500, template="plotly_dark", hovermode="x unified",
-            legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1),
-            margin=dict(l=40,r=40,t=40,b=60),
-            xaxis=dict(title="Time",tickangle=-45,tickmode="auto",nticks=24))
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=40, r=40, t=40, b=60),
+            xaxis=dict(title="Time", tickangle=-45, tickmode="auto", nticks=24))
         fig.update_yaxes(title_text="Power (kW)", secondary_y=False)
         fig.update_yaxes(title_text="SOC (%)",    secondary_y=True)
         st.plotly_chart(fig, use_container_width=True)
@@ -590,40 +619,40 @@ if "df_result" in st.session_state:
 
     st.divider()
 
-# Chart
+    # ── Chart 2 ────────────────────────────────────────────────
     st.subheader("📊 Interactive Energy Chart 2")
-    SIGNALS = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Grid Available","Tariff"]
-    COLORS  = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A","#E91E63"]
+    SIGNALS2 = ["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Grid Available","Tariff"]
+    COLORS2  = ["#2196F3","#4CAF50","#FF9800","#E91E63","#9C27B0","#00BCD4","#F44336","#8BC34A","#E91E63"]
 
-    cc1,cc2 = st.columns(2)
+    cc1, cc2 = st.columns(2)
     with cc1:
-        pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
+        pri = st.multiselect("Primary Y-axis (kW)", SIGNALS2,
                              default=["Grid Available","Tariff"],
                              key="chart2_pri")
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS,
+        sec = st.multiselect("Secondary Y-axis", SIGNALS2,
                              default=["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)"],
                              key="chart2_sec")
 
     if pri or sec:
-        fig = make_subplots(specs=[[{"secondary_y":True}]])
-        x = df_result["Time"].tolist(); ci=0
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        ci = 0
         for s in pri:
-            if s in df_result.columns:
-                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s,
-                    line=dict(color=COLORS[ci%len(COLORS)],width=2), mode="lines"),
-                    secondary_y=False); ci+=1
+            if s in df_slice.columns:
+                fig.add_trace(go.Scatter(x=x_slice, y=df_slice[s].tolist(), name=s,
+                    line=dict(color=COLORS2[ci % len(COLORS2)], width=2), mode="lines"),
+                    secondary_y=False); ci += 1
         for s in sec:
-            if s in df_result.columns:
-                fig.add_trace(go.Scatter(x=x, y=df_result[s].tolist(), name=s+" (R)",
-                    line=dict(color=COLORS[ci%len(COLORS)],width=2,dash="dot"), mode="lines"),
-                    secondary_y=True); ci+=1
+            if s in df_slice.columns:
+                fig.add_trace(go.Scatter(x=x_slice, y=df_slice[s].tolist(), name=s + " (R)",
+                    line=dict(color=COLORS2[ci % len(COLORS2)], width=2, dash="dot"), mode="lines"),
+                    secondary_y=True); ci += 1
         fig.update_layout(height=500, template="plotly_dark", hovermode="x unified",
-            legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="right",x=1),
-            margin=dict(l=40,r=40,t=40,b=60),
-            xaxis=dict(title="Time",tickangle=-45,tickmode="auto",nticks=24))
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=40, r=40, t=40, b=60),
+            xaxis=dict(title="Time", tickangle=-45, tickmode="auto", nticks=24))
         fig.update_yaxes(title_text="0-False/1-True", secondary_y=False)
-        fig.update_yaxes(title_text="Power (kW)",    secondary_y=True)
+        fig.update_yaxes(title_text="Power (kW)",     secondary_y=True)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Select at least one signal above to plot.")
