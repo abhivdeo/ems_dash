@@ -177,7 +177,16 @@ _DEFAULT_RULES = parse_rules_df(pd.DataFrame(SAMPLE_RULES_ROWS, columns=RULES_CO
 # ══════════════════════════════════════════════════════════════
 
 def get_tod(ts):
-    h = int(str(ts).split(":")[0])
+    """Extract hour from either 'YYYY-MM-DD HH:MM' / 'YYYY-MM-DD HH:MM:SS'
+    or legacy 'HH:MM:SS' / 'HH:MM' formats."""
+    s = str(ts).strip()
+    # If there is a space, the part after it is the time component
+    if " " in s:
+        s = s.split(" ", 1)[1]
+    # If there is a 'T' (ISO 8601), split on that
+    elif "T" in s:
+        s = s.split("T", 1)[1]
+    h = int(s.split(":")[0])
     return (1 if 0<=h<6 else 0, 1 if 6<=h<12 else 0,
             1 if 12<=h<18 else 0, 1 if 18<=h<24 else 0)
 
@@ -220,10 +229,30 @@ def compute_power(load_kw, re_kw, load_src, batt_mode, grid_out):
     return round(load_kw,3), round(batt_kw,3), round(grid_kw,3)
 
 
+def _normalise_time(val):
+    """Return a clean string for a Time value.
+
+    Accepts any of:
+      - pandas Timestamp / datetime objects
+      - 'YYYY-MM-DD HH:MM'  or  'YYYY-MM-DD HH:MM:SS'
+      - 'HH:MM:SS'  or  'HH:MM'   (legacy, no date)
+    """
+    if hasattr(val, "strftime"):          # Timestamp / datetime
+        return val.strftime("%Y-%m-%d %H:%M:%S")
+    s = str(val).strip()
+    try:
+        parsed = pd.to_datetime(s, dayfirst=False)
+        if parsed.year < 1970:            # Excel time-only epoch
+            return parsed.strftime("%H:%M:%S")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return s
+
+
 def process_dataframe(df, rules):
     out = []
     for _, row in df.iterrows():
-        ts  = str(row["Time"])
+        ts  = _normalise_time(row["Time"])
         soc = float(row["Battery SOC (%)"])
         re  = float(row["RE (kW)"])
         ld  = float(row["Load (kW)"])
@@ -325,7 +354,7 @@ with st.sidebar:
             pd.DataFrame({c:[""]*n for c in INPUT_COLS}),
             use_container_width=True, num_rows="dynamic",
             column_config={
-                "Time": st.column_config.TextColumn("Time (HH:MM:SS)"),
+                "Time": st.column_config.TextColumn("Time (HH:MM:SS or YYYY-MM-DD HH:MM:SS)"),
                 "Battery SOC (%)": st.column_config.NumberColumn(min_value=0, max_value=100),
                 "RE (kW)":         st.column_config.NumberColumn(min_value=0.0),
                 "Load (kW)":       st.column_config.NumberColumn(min_value=0.0),
@@ -649,7 +678,7 @@ else:
 ### 🗂️ Input Data Columns
 | Column | Description |
 |---|---|
-| `Time` | HH:MM:SS (e.g. 10-min intervals) |
+| `Time` | `HH:MM:SS` **or** `YYYY-MM-DD HH:MM(:SS)` — both formats accepted, full datetime recommended for multi-day / full-year data |
 | `Battery SOC (%)` | State of Charge 0–100 |
 | `RE (kW)` | Solar + Wind generation |
 | `Load (kW)` | Site load demand |
