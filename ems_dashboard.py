@@ -266,10 +266,14 @@ def process_dataframe(df, rules):
         gtl  = 1 if tar==0 else 0
         src,bmode,gmode,rno,note = match_rule(re_f,bl,bm,bh,ga,gth,gtl,0,t1,t2,t3,t4,rules)
         lv,bv,gv = compute_power(ld,re,src,bmode,gmode)
+        grid_import = round(max(0,  gv), 3)   # positive grid_out = importing
+        grid_export = round(max(0, -gv), 3)   # negative grid_out = exporting
         out.append({"Time":ts,"Battery SOC (%)":soc,"RE (kW)":re,"Load (kW)":ld,
                     "Grid Available":ga,"Tariff":tar,"Rule No":rno,
                     "Load Source":src,"Batt Mode":bmode,"Grid Mode":gmode,
-                    "Load_out (kW)":lv,"Batt_out (kW)":bv,"Grid_out (kW)":gv,"Note":note})
+                    "Load_out (kW)":lv,"Batt_out (kW)":bv,"Grid_out (kW)":gv,
+                    "Grid Import (kW)":grid_import,"Grid Export (kW)":grid_export,
+                    "Note":note})
     return pd.DataFrame(out)
 
 
@@ -277,7 +281,7 @@ def process_dataframe(df, rules):
 #  UI
 # ══════════════════════════════════════════════════════════════
 
-st.title("⚡ Energy Management System Dashboard 1430")
+st.title("⚡ Energy Management System Dashboard")
 st.caption("Upload your rules & input data — or download the sample templates and use them to get started instantly.")
 
 # ── Sidebar ────────────────────────────────────────────────────
@@ -663,11 +667,13 @@ if "df_result" in st.session_state:
     st.subheader("📋 EMS Output Table")
     DCOLS = ["Time","Battery SOC (%)","RE (kW)","Load (kW)","Grid Available","Tariff",
              "Rule No","Load Source","Batt Mode","Grid Mode",
-             "Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Note"]
+             "Load_out (kW)","Batt_out (kW)","Grid_out (kW)",
+             "Grid Import (kW)","Grid Export (kW)","Note"]
 
     # Avoid pandas Styler – incompatible with Arrow serialisation in newer Streamlit
     df_display = df_result[DCOLS].copy()
-    for _col in ["Batt_out (kW)", "Grid_out (kW)", "Load_out (kW)"]:
+    for _col in ["Batt_out (kW)", "Grid_out (kW)", "Load_out (kW)",
+                  "Grid Import (kW)", "Grid Export (kW)"]:
         df_display[_col] = df_display[_col].round(3)
 
     st.dataframe(
@@ -681,6 +687,8 @@ if "df_result" in st.session_state:
             "Load_out (kW)":  st.column_config.NumberColumn("Load_out (kW)",  format="%.3f"),
             "Batt_out (kW)":  st.column_config.NumberColumn("Batt_out (kW)",  format="%.3f"),
             "Grid_out (kW)":  st.column_config.NumberColumn("Grid_out (kW)",  format="%.3f"),
+            "Grid Import (kW)": st.column_config.NumberColumn("Grid Import (kW)", format="%.3f"),
+            "Grid Export (kW)": st.column_config.NumberColumn("Grid Export (kW)", format="%.3f"),
         },
     )
 
