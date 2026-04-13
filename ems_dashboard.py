@@ -249,6 +249,7 @@ def _normalise_time(val):
         return s
 
 
+@st.cache_data
 def process_dataframe(df, rules):
     out = []
     for _, row in df.iterrows():
@@ -382,10 +383,20 @@ with st.sidebar:
 # Auto-run on first load when sample data is selected
 auto_run = (input_mode == "Use Sample Data") and can_run
 
+# Store result in session_state so multiselect/widget interactions
+# don't re-trigger the heavy computation
 if (generate or auto_run) and can_run:
-
+    # Clear any cached result so new inputs are always recomputed
+    st.session_state.pop("df_result", None)
     with st.spinner("Running EMS logic…"):
-        df_result = process_dataframe(df_input, active_rules)
+        st.session_state["df_result"]    = process_dataframe(df_input, active_rules)
+        st.session_state["rules_file"]   = rules_file
+        st.session_state["active_rules"] = active_rules
+
+if "df_result" in st.session_state:
+    df_result    = st.session_state["df_result"]
+    rules_file   = st.session_state.get("rules_file", rules_file)
+    active_rules = st.session_state.get("active_rules", active_rules)
 
     rules_src = "custom" if rules_file else "default"
     st.success(
@@ -544,9 +555,11 @@ if (generate or auto_run) and can_run:
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
-                             default=["Load (kW)","RE (kW)","Load_out (kW)","Grid_out (kW)"])
+                             default=["Load (kW)","RE (kW)","Load_out (kW)","Grid_out (kW)"],
+                             key="chart1_pri")
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"])
+        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Battery SOC (%)"],
+                             key="chart1_sec")
 
     if pri or sec:
         fig = make_subplots(specs=[[{"secondary_y":True}]])
@@ -581,9 +594,12 @@ if (generate or auto_run) and can_run:
     cc1,cc2 = st.columns(2)
     with cc1:
         pri = st.multiselect("Primary Y-axis (kW)", SIGNALS,
-                             default=["Grid Available","Tariff"])
+                             default=["Grid Available","Tariff"],
+                             key="chart2_pri")
     with cc2:
-        sec = st.multiselect("Secondary Y-axis", SIGNALS, default=["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)"])
+        sec = st.multiselect("Secondary Y-axis", SIGNALS,
+                             default=["Load (kW)","RE (kW)","Load_out (kW)","Batt_out (kW)","Grid_out (kW)"],
+                             key="chart2_sec")
 
     if pri or sec:
         fig = make_subplots(specs=[[{"secondary_y":True}]])
@@ -616,22 +632,24 @@ if (generate or auto_run) and can_run:
              "Rule No","Load Source","Batt Mode","Grid Mode",
              "Load_out (kW)","Batt_out (kW)","Grid_out (kW)","Note"]
 
-    def _csrc(v):
-        m={"RE":"#1b5e20","Battery":"#0d47a1","Grid":"#b71c1c"}
-        bg=m.get(v,""); return f"background-color:{bg};color:white;" if bg else ""
+    # Avoid pandas Styler – incompatible with Arrow serialisation in newer Streamlit
+    df_display = df_result[DCOLS].copy()
+    for _col in ["Batt_out (kW)", "Grid_out (kW)", "Load_out (kW)"]:
+        df_display[_col] = df_display[_col].round(3)
 
-    def _cbatt(v):
-        if v=="Charge":    return "background-color:#1565c0;color:white;"
-        if v=="Discharge": return "background-color:#e65100;color:white;"
-        return ""
-
-    _s  = df_result[DCOLS].style
-    _fn = _s.map if hasattr(_s,"map") else _s.applymap
-    styled = _fn(_csrc, subset=["Load Source"])
-    _fn2 = styled.map if hasattr(styled,"map") else styled.applymap
-    styled = _fn2(_cbatt, subset=["Batt Mode"])
-    styled = styled.format({"Batt_out (kW)":"{:+.3f}","Grid_out (kW)":"{:+.3f}","Load_out (kW)":"{:.3f}"})
-    st.dataframe(styled, use_container_width=True, height=420)
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        height=420,
+        column_config={
+            "Battery SOC (%)": st.column_config.ProgressColumn(
+                "Battery SOC (%)", min_value=0, max_value=100, format="%.1f %%"
+            ),
+            "Load_out (kW)":  st.column_config.NumberColumn("Load_out (kW)",  format="%.3f"),
+            "Batt_out (kW)":  st.column_config.NumberColumn("Batt_out (kW)",  format="%.3f"),
+            "Grid_out (kW)":  st.column_config.NumberColumn("Grid_out (kW)",  format="%.3f"),
+        },
+    )
 
     # Download results
     st.divider()
