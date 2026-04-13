@@ -277,7 +277,7 @@ def process_dataframe(df, rules):
 #  UI
 # ══════════════════════════════════════════════════════════════
 
-st.title("⚡ Energy Management System Dashboard")
+st.title("⚡ Energy Management System Dashboard 1430")
 st.caption("Upload your rules & input data — or download the sample templates and use them to get started instantly.")
 
 # ── Sidebar ────────────────────────────────────────────────────
