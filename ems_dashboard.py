@@ -277,7 +277,7 @@ def process_dataframe(df, rules):
 #  UI
 # ══════════════════════════════════════════════════════════════
 
-st.title("⚡ Energy Management System Dashboard 1317")
+st.title("⚡ Energy Management System Dashboard 1324")
 st.caption("Upload your rules & input data — or download the sample templates and use them to get started instantly.")
 
 # ── Sidebar ────────────────────────────────────────────────────
@@ -380,14 +380,18 @@ with st.sidebar:
 #  MAIN PANEL
 # ══════════════════════════════════════════════════════════════
 
-# Auto-run on first load when sample data is selected
-auto_run = (input_mode == "Use Sample Data") and can_run
+# Auto-run ONCE on first ever load when sample data is selected.
+# Use a session flag so subsequent re-runs (widget interactions) don't
+# re-trigger this and wipe the stored result.
+auto_run = (input_mode == "Use Sample Data") and can_run and ("df_result" not in st.session_state)
 
-# Store result in session_state so multiselect/widget interactions
-# don't re-trigger the heavy computation
-if (generate or auto_run) and can_run:
-    # Clear any cached result so new inputs are always recomputed
-    st.session_state.pop("df_result", None)
+should_run = generate or auto_run
+
+if should_run and can_run:
+    # On explicit Generate click, bust the @cache_data cache so new
+    # data/rules are always recomputed; auto_run reuses cache if inputs unchanged.
+    if generate:
+        process_dataframe.clear()
     with st.spinner("Running EMS logic…"):
         st.session_state["df_result"]    = process_dataframe(df_input, active_rules)
         st.session_state["rules_file"]   = rules_file
