@@ -670,27 +670,66 @@ if "df_result" in st.session_state:
              "Load_out (kW)","Batt_out (kW)","Grid_out (kW)",
              "Grid Import (kW)","Grid Export (kW)","Note"]
 
-    # Avoid pandas Styler – incompatible with Arrow serialisation in newer Streamlit
+    # Row colours keyed on Load Source
+    _ROW_COLORS = {"Grid": "#fff0f0", "Battery": "#fff7ec", "RE": "#f0faf2"}
+
     df_display = df_result[DCOLS].copy()
     for _col in ["Batt_out (kW)", "Grid_out (kW)", "Load_out (kW)",
                   "Grid Import (kW)", "Grid Export (kW)"]:
         df_display[_col] = df_display[_col].round(3)
 
-    st.dataframe(
-        df_display,
-        use_container_width=True,
-        height=420,
-        column_config={
-            "Battery SOC (%)": st.column_config.ProgressColumn(
-                "Battery SOC (%)", min_value=0, max_value=100, format="%.1f %%"
-            ),
-            "Load_out (kW)":  st.column_config.NumberColumn("Load_out (kW)",  format="%.3f"),
-            "Batt_out (kW)":  st.column_config.NumberColumn("Batt_out (kW)",  format="%.3f"),
-            "Grid_out (kW)":  st.column_config.NumberColumn("Grid_out (kW)",  format="%.3f"),
-            "Grid Import (kW)": st.column_config.NumberColumn("Grid Import (kW)", format="%.3f"),
-            "Grid Export (kW)": st.column_config.NumberColumn("Grid Export (kW)", format="%.3f"),
-        },
-    )
+    # Build HTML table with row-level background colours
+    def _build_table_html(df, row_colors):
+        col_widths = {
+            "Time": "140px", "Battery SOC (%)": "90px", "RE (kW)": "72px",
+            "Load (kW)": "72px", "Grid Available": "72px", "Tariff": "60px",
+            "Rule No": "60px", "Load Source": "80px", "Batt Mode": "82px",
+            "Grid Mode": "82px", "Load_out (kW)": "90px", "Batt_out (kW)": "90px",
+            "Grid_out (kW)": "90px", "Grid Import (kW)": "100px",
+            "Grid Export (kW)": "100px", "Note": "200px",
+        }
+        header_cells = "".join(
+            f'<th style="width:{col_widths.get(c,"90px")};min-width:{col_widths.get(c,"90px")};'
+            f'padding:6px 8px;background:#1e2130;color:#8a9bb0;font-size:11px;'
+            f'text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #2e3250;'
+            f'white-space:nowrap;position:sticky;top:0;z-index:1;">{c}</th>'
+            for c in df.columns
+        )
+        rows_html = ""
+        for _, row in df.iterrows():
+            bg = row_colors.get(str(row.get("Load Source", "")), "#1a1d2e")
+            # darken text slightly for readability on coloured bg
+            fg = "#1a1a1a"
+            cells = ""
+            for c in df.columns:
+                val = row[c]
+                if c == "Battery SOC (%)":
+                    pct = min(100, max(0, float(val)))
+                    bar_color = "#4CAF50" if pct >= 70 else "#FF9800" if pct >= 30 else "#F44336"
+                    cells += (
+                        f'<td style="padding:5px 8px;font-size:12px;color:{fg};">'
+                        f'<div style="background:#ddd;border-radius:4px;height:10px;width:100%;margin-bottom:2px;">'
+                        f'<div style="background:{bar_color};width:{pct:.0f}%;height:10px;border-radius:4px;"></div></div>'
+                        f'<span style="font-size:10px;">{val:.1f}%</span></td>'
+                    )
+                else:
+                    if isinstance(val, float):
+                        display = f"{val:+.3f}" if c in ("Batt_out (kW)","Grid_out (kW)") else f"{val:.3f}" if "(kW)" in c else f"{val}"
+                    else:
+                        display = str(val)
+                    cells += f'<td style="padding:5px 8px;font-size:12px;color:{fg};white-space:nowrap;">{display}</td>'
+            rows_html += f'<tr style="background:{bg};">{cells}</tr>'
+
+        return f"""
+        <div style="overflow:auto;max-height:440px;border:1px solid #2e3250;border-radius:8px;">
+          <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;">
+            <thead><tr>{header_cells}</tr></thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>
+        """
+
+    st.html(_build_table_html(df_display, _ROW_COLORS))
 
     # Download results
     st.divider()
