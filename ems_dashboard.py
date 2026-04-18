@@ -235,13 +235,21 @@ def _normalise_time(val):
     Accepts any of:
       - pandas Timestamp / datetime objects
       - 'YYYY-MM-DD HH:MM'  or  'YYYY-MM-DD HH:MM:SS'
+      - 'DD-MM-YYYY HH:MM'  or  'DD/MM/YYYY HH:MM'  (dayfirst formats)
       - 'HH:MM:SS'  or  'HH:MM'   (legacy, no date)
     """
     if hasattr(val, "strftime"):          # Timestamp / datetime
         return val.strftime("%Y-%m-%d %H:%M:%S")
     s = str(val).strip()
+    # Detect DD-MM-YYYY or DD/MM/YYYY by checking if the first numeric token
+    # is <= 31 and the third token (after splitting on - or /) is 4 digits (year).
+    import re as _re
+    _dayfirst = False
+    _m = _re.match(r'^(\d{1,2})[-/](\d{1,2})[-/](\d{4})', s)
+    if _m and int(_m.group(1)) <= 31 and int(_m.group(2)) <= 12:
+        _dayfirst = True
     try:
-        parsed = pd.to_datetime(s, dayfirst=False)
+        parsed = pd.to_datetime(s, dayfirst=_dayfirst)
         if parsed.year < 1970:            # Excel time-only epoch
             return parsed.strftime("%H:%M:%S")
         return parsed.strftime("%Y-%m-%d %H:%M:%S")
@@ -670,18 +678,36 @@ if "df_result" in st.session_state:
              "Load_out (kW)","Batt_out (kW)","Grid_out (kW)",
              "Grid Import (kW)","Grid Export (kW)","Note"]
 
-    # Row colours keyed on Load Source
-    _ROW_COLORS = {"Grid": "#fff0f0", "Battery": "#fff7ec", "RE": "#f0faf2"}
-
+    # Prepare display DataFrame
     df_display = df_result[DCOLS].copy()
     for _col in ["Batt_out (kW)", "Grid_out (kW)", "Load_out (kW)",
                   "Grid Import (kW)", "Grid Export (kW)"]:
         df_display[_col] = df_display[_col].round(3)
 
-    # Build HTML table with row-level background colours
+    # Row colours keyed on Load Source
+    _ROW_COLORS = {"Grid": "#fff0f0", "Battery": "#fff7ec", "RE": "#f0faf2"}
+
+    # ── Pagination controls ────────────────────────────────────
+    _PAGE_SIZE = 100
+    _total_rows = len(df_display)
+    _total_pages = max(1, (_total_rows + _PAGE_SIZE - 1) // _PAGE_SIZE)
+
+    _pc1, _pc2, _pc3 = st.columns([2, 3, 2])
+    with _pc1:
+        st.caption(f"**{_total_rows:,}** rows · {_total_pages} pages")
+    with _pc2:
+        _page = st.number_input("Page", min_value=1, max_value=_total_pages,
+                                value=1, step=1, key="tbl_page",
+                                label_visibility="collapsed")
+    with _pc3:
+        st.caption(f"Showing rows {(_page-1)*_PAGE_SIZE+1:,} – {min(_page*_PAGE_SIZE, _total_rows):,}")
+
+    _df_page = df_display.iloc[(_page - 1) * _PAGE_SIZE : _page * _PAGE_SIZE]
+
+    # ── HTML table builder ─────────────────────────────────────
     def _build_table_html(df, row_colors):
         col_widths = {
-            "Time": "140px", "Battery SOC (%)": "90px", "RE (kW)": "72px",
+            "Time": "140px", "Battery SOC (%)": "100px", "RE (kW)": "72px",
             "Load (kW)": "72px", "Grid Available": "72px", "Tariff": "60px",
             "Rule No": "60px", "Load Source": "80px", "Batt Mode": "82px",
             "Grid Mode": "82px", "Load_out (kW)": "90px", "Batt_out (kW)": "90px",
@@ -697,9 +723,8 @@ if "df_result" in st.session_state:
         )
         rows_html = ""
         for _, row in df.iterrows():
-            bg = row_colors.get(str(row.get("Load Source", "")), "#1a1d2e")
-            # darken text slightly for readability on coloured bg
-            fg = "#1a1a1a"
+            bg  = row_colors.get(str(row.get("Load Source", "")), "#1a1d2e")
+            fg  = "#1a1a1a"
             cells = ""
             for c in df.columns:
                 val = row[c]
@@ -708,28 +733,30 @@ if "df_result" in st.session_state:
                     bar_color = "#4CAF50" if pct >= 70 else "#FF9800" if pct >= 30 else "#F44336"
                     cells += (
                         f'<td style="padding:5px 8px;font-size:12px;color:{fg};">'
-                        f'<div style="background:#ddd;border-radius:4px;height:10px;width:100%;margin-bottom:2px;">'
-                        f'<div style="background:{bar_color};width:{pct:.0f}%;height:10px;border-radius:4px;"></div></div>'
+                        f'<div style="background:#ddd;border-radius:4px;height:10px;'
+                        f'width:100%;margin-bottom:2px;"><div style="background:{bar_color};'
+                        f'width:{pct:.0f}%;height:10px;border-radius:4px;"></div></div>'
                         f'<span style="font-size:10px;">{val:.1f}%</span></td>'
                     )
                 else:
                     if isinstance(val, float):
-                        display = f"{val:+.3f}" if c in ("Batt_out (kW)","Grid_out (kW)") else f"{val:.3f}" if "(kW)" in c else f"{val}"
+                        display = (f"{val:+.3f}" if c in ("Batt_out (kW)","Grid_out (kW)")
+                                   else f"{val:.3f}" if "(kW)" in c else f"{val}")
                     else:
                         display = str(val)
-                    cells += f'<td style="padding:5px 8px;font-size:12px;color:{fg};white-space:nowrap;">{display}</td>'
+                    cells += (f'<td style="padding:5px 8px;font-size:12px;color:{fg};'
+                              f'white-space:nowrap;">{display}</td>')
             rows_html += f'<tr style="background:{bg};">{cells}</tr>'
 
-        return f"""
-        <div style="overflow:auto;max-height:440px;border:1px solid #2e3250;border-radius:8px;">
-          <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;">
-            <thead><tr>{header_cells}</tr></thead>
-            <tbody>{rows_html}</tbody>
-          </table>
-        </div>
-        """
+        return (
+            '<div style="overflow:auto;max-height:440px;border:1px solid #2e3250;border-radius:8px;">' +
+            '<table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;">' +
+            f'<thead><tr>{header_cells}</tr></thead>' +
+            f'<tbody>{rows_html}</tbody>' +
+            '</table></div>'
+        )
 
-    st.html(_build_table_html(df_display, _ROW_COLORS))
+    st.html(_build_table_html(_df_page, _ROW_COLORS))
 
     # Download results
     st.divider()
