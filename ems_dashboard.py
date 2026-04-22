@@ -428,7 +428,7 @@ with st.sidebar:
     st.caption("Used for Coulomb-counting SOC simulation.")
     batt_ah = st.number_input(
         "Rated Battery Capacity (Ah)",
-        min_value=1.0, max_value=100000.0, value=200.0, step=10.0,
+        min_value=1.0, max_value=100000.0, value=5000.0, step=10.0,
         help="Total usable Ah capacity of the battery bank (e.g. 200 Ah for a 200 Ah battery)."
     )
     batt_vnom = st.number_input(
@@ -547,7 +547,7 @@ if "df_result" in st.session_state:
     )
 
     # Battery parameter summary
-    _bah  = st.session_state.get("batt_ah_used",   200.0)
+    _bah  = st.session_state.get("batt_ah_used",   5000.0)
     _bv   = st.session_state.get("batt_vnom_used",  48.0)
     _beta = st.session_state.get("batt_eta_used",   0.95)
     _bwh  = _bah * _bv / 1000.0
@@ -879,7 +879,7 @@ if "df_result" in st.session_state:
                     )
                 elif c == "Battery Ah":
                     # Retrieve rated Ah from session state for the fill bar
-                    _rated = st.session_state.get("batt_ah_used", 200.0)
+                    _rated = st.session_state.get("batt_ah_used", 5000.0)
                     ah_val = float(val)
                     ah_pct = min(100.0, max(0.0, ah_val / _rated * 100.0)) if _rated > 0 else 0.0
                     bar_color = "#4CAF50" if ah_pct >= 70 else "#FF9800" if ah_pct >= 30 else "#F44336"
