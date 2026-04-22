@@ -211,22 +211,39 @@ def match_rule(re_f,bl,bm,bh,grid,gth,gtl,dg,t1,t2,t3,t4,rules):
     return "Grid","Idle","No Export",0,"Fallback: Grid"
 
 
-def compute_power(load_kw, re_kw, load_src, batt_mode, grid_out):
+def compute_power(load_kw, re_kw, load_src, batt_mode, grid_out, grid_charge_rate=0.0):
+    """Compute load, battery, and grid power flows.
+
+    grid_charge_rate (kW): dedicated grid-to-battery charge power when
+    Load Source = Grid and Batt Mode = Charge and RE is insufficient.
+    Positive batt_kw = charging the battery.
+    """
     if load_src == "RE":
         excess  = re_kw - load_kw
-        batt_kw = max(0, excess) if batt_mode=="Charge" else 0
-        grid_kw = (-max(0,excess-batt_kw) if grid_out=="Export" and excess>0 else 0)
-        if excess < 0: grid_kw = -excess
+        batt_kw = max(0, excess) if batt_mode == "Charge" else 0
+        grid_kw = (-max(0, excess - batt_kw) if grid_out == "Export" and excess > 0 else 0)
+        if excess < 0:
+            grid_kw = -excess
     elif load_src == "Battery":
         batt_kw = -load_kw
-        grid_kw = -re_kw if grid_out=="Export" and re_kw>0 else 0
+        grid_kw = -re_kw if grid_out == "Export" and re_kw > 0 else 0
     elif load_src == "Grid":
-        grid_kw = load_kw
-        batt_kw = re_kw if batt_mode=="Charge" else 0
-        if grid_out=="Export" and re_kw>0: grid_kw -= re_kw
+        # RE surplus charges battery first; remaining charge power comes from grid
+        re_surplus = max(0.0, re_kw - load_kw)
+        if batt_mode == "Charge":
+            re_to_batt   = re_surplus
+            grid_to_batt = max(0.0, grid_charge_rate - re_to_batt)
+            batt_kw      = re_to_batt + grid_to_batt
+        else:
+            batt_kw      = 0.0
+            grid_to_batt = 0.0
+        # Grid covers load + its share of battery charge (RE covers its own share)
+        grid_kw = load_kw + grid_to_batt
+        if grid_out == "Export" and re_kw > 0:
+            grid_kw -= min(re_kw, load_kw)      # RE offsets some load from grid
     else:
         batt_kw, grid_kw = 0, load_kw
-    return round(load_kw,3), round(batt_kw,3), round(grid_kw,3)
+    return round(load_kw, 3), round(batt_kw, 3), round(grid_kw, 3)
 
 
 def _normalise_time(val):
@@ -284,7 +301,7 @@ def _interval_hours(ts_prev, ts_curr):
 
 
 @st.cache_data
-def process_dataframe(df, rules, batt_ah=5000.0, batt_vnom=48.0, batt_eta=0.95, batt_soc0=None):
+def process_dataframe(df, rules, batt_ah=200.0, batt_vnom=48.0, batt_eta=0.95, batt_soc0=None, grid_charge_rate=2.0):
     """Run EMS rule-matching and Coulomb-counting SOC simulation.
 
     Coulomb-counting formula (per interval):
@@ -328,7 +345,7 @@ def process_dataframe(df, rules, batt_ah=5000.0, batt_vnom=48.0, batt_eta=0.95, 
         gtl  = 1 if tar == 0 else 0
         src, bmode, gmode, rno, note = match_rule(
             re_f, bl, bm, bh, ga, gth, gtl, 0, t1, t2, t3, t4, rules)
-        lv, bv, gv = compute_power(ld, re, src, bmode, gmode)
+        lv, bv, gv = compute_power(ld, re, src, bmode, gmode, grid_charge_rate)
 
         grid_import = round(max(0,  gv), 3)
         grid_export = round(max(0, -gv), 3)
@@ -428,7 +445,7 @@ with st.sidebar:
     st.caption("Used for Coulomb-counting SOC simulation.")
     batt_ah = st.number_input(
         "Rated Battery Capacity (Ah)",
-        min_value=1.0, max_value=100000.0, value=5000.0, step=10.0,
+        min_value=1.0, max_value=100000.0, value=200.0, step=10.0,
         help="Total usable Ah capacity of the battery bank (e.g. 200 Ah for a 200 Ah battery)."
     )
     batt_vnom = st.number_input(
@@ -446,6 +463,15 @@ with st.sidebar:
         min_value=0.0, max_value=100.0, value=None, step=1.0,
         placeholder="Leave blank → use first row value",
         help="Starting SOC for Coulomb counting. If left blank, the first row's SOC column value is used."
+    )
+    grid_charge_rate = st.number_input(
+        "Grid Charge Rate (kW)",
+        min_value=0.0, max_value=10000.0, value=2.0, step=0.5,
+        help=(
+            "Max power (kW) the grid delivers to charge the battery when "
+            "Load Source = Grid and Batt Mode = Charge. "
+            "Set to 0 to disable grid-to-battery charging entirely."
+        )
     )
 
     st.divider()
@@ -528,12 +554,14 @@ if should_run and can_run:
             batt_vnom=float(batt_vnom),
             batt_eta=float(batt_eta),
             batt_soc0=_soc0,
+            grid_charge_rate=float(grid_charge_rate),
         )
-        st.session_state["rules_file"]      = rules_file
-        st.session_state["active_rules"]    = active_rules
-        st.session_state["batt_ah_used"]    = float(batt_ah)
-        st.session_state["batt_vnom_used"]  = float(batt_vnom)
-        st.session_state["batt_eta_used"]   = float(batt_eta)
+        st.session_state["rules_file"]          = rules_file
+        st.session_state["active_rules"]        = active_rules
+        st.session_state["batt_ah_used"]        = float(batt_ah)
+        st.session_state["batt_vnom_used"]      = float(batt_vnom)
+        st.session_state["batt_eta_used"]       = float(batt_eta)
+        st.session_state["grid_charge_rate_used"] = float(grid_charge_rate)
 
 if "df_result" in st.session_state:
     df_result    = st.session_state["df_result"]
@@ -547,14 +575,16 @@ if "df_result" in st.session_state:
     )
 
     # Battery parameter summary
-    _bah  = st.session_state.get("batt_ah_used",   5000.0)
+    _bah  = st.session_state.get("batt_ah_used",   200.0)
     _bv   = st.session_state.get("batt_vnom_used",  48.0)
     _beta = st.session_state.get("batt_eta_used",   0.95)
+    _gcr  = st.session_state.get("grid_charge_rate_used", 2.0)
     _bwh  = _bah * _bv / 1000.0
     st.info(
         f"🔋 **Coulomb-counting SOC** — Rated capacity: **{_bah:.0f} Ah** "
         f"({_bwh:.1f} kWh @ {_bv:.0f} V)  |  "
         f"Efficiency: **{_beta*100:.0f}%**  |  "
+        f"Grid charge rate: **{_gcr:.1f} kW**  |  "
         f"SOC is simulated forward from the initial value using measured battery power."
     )
 
@@ -879,7 +909,7 @@ if "df_result" in st.session_state:
                     )
                 elif c == "Battery Ah":
                     # Retrieve rated Ah from session state for the fill bar
-                    _rated = st.session_state.get("batt_ah_used", 5000.0)
+                    _rated = st.session_state.get("batt_ah_used", 200.0)
                     ah_val = float(val)
                     ah_pct = min(100.0, max(0.0, ah_val / _rated * 100.0)) if _rated > 0 else 0.0
                     bar_color = "#4CAF50" if ah_pct >= 70 else "#FF9800" if ah_pct >= 30 else "#F44336"
