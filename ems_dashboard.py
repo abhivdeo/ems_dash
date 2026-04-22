@@ -302,12 +302,14 @@ def process_dataframe(df, rules, batt_ah=200.0, batt_vnom=48.0, batt_eta=0.95, b
     for i in range(n):
         ts_parsed.append(_parse_timestamp(_normalise_time(rows_list.loc[i, "Time"])))
 
-    # Initial SOC
+    # Initial SOC and Ah
     if batt_soc0 is not None:
         soc = float(batt_soc0)
     else:
         soc = float(rows_list.loc[0, "Battery SOC (%)"])
     soc = max(0.0, min(100.0, soc))
+    # Running Ah stored in battery (derived from initial SOC)
+    ah_stored = round(soc / 100.0 * batt_ah, 3)
 
     out = []
     for i in range(n):
@@ -339,22 +341,27 @@ def process_dataframe(df, rules, batt_ah=200.0, batt_vnom=48.0, batt_eta=0.95, b
             dt_h = _interval_hours(ts_parsed[i - 1], ts_parsed[i])
 
         # Battery current: P(kW) × 1000 / V_nom  → Amperes
-        i_bat = bv * 1000.0 / batt_vnom      # A  (+ = charging, − = discharging)
-        delta_ah = i_bat * dt_h              # Ah transferred this interval
+        i_bat    = bv * 1000.0 / batt_vnom      # A  (+ = charging, − = discharging)
+        delta_ah = i_bat * dt_h                  # Ah transferred this interval
 
         if delta_ah >= 0:
             # Charging: apply efficiency (η < 1 means less Ah actually stored)
-            soc_new = soc + (delta_ah * batt_eta) / batt_ah * 100.0
+            effective_delta_ah = delta_ah * batt_eta
         else:
-            # Discharging: no extra efficiency penalty here (P_bat already = output)
-            soc_new = soc + delta_ah / batt_ah * 100.0
+            # Discharging: no extra efficiency penalty
+            effective_delta_ah = delta_ah
 
-        soc_new = round(max(0.0, min(100.0, soc_new)), 2)
-        soc     = soc_new
+        ah_stored_new = ah_stored + effective_delta_ah
+        ah_stored_new = round(max(0.0, min(batt_ah, ah_stored_new)), 3)
+        soc_new       = round(ah_stored_new / batt_ah * 100.0, 2)
+
+        ah_stored = ah_stored_new
+        soc       = soc_new
 
         out.append({
             "Time": ts,
             "Battery SOC (%)": soc,
+            "Battery Ah": ah_stored,
             "RE (kW)": re, "Load (kW)": ld,
             "Grid Available": ga, "Tariff": tar,
             "Rule No": rno,
@@ -804,7 +811,7 @@ if "df_result" in st.session_state:
     
     # Output table
     st.subheader("📋 EMS Output Table")
-    DCOLS = ["Time","Battery SOC (%)","RE (kW)","Load (kW)","Grid Available","Tariff",
+    DCOLS = ["Time","Battery SOC (%)","Battery Ah","RE (kW)","Load (kW)","Grid Available","Tariff",
              "Rule No","Load Source","Batt Mode","Grid Mode",
              "Load_out (kW)","Batt_out (kW)","Grid_out (kW)",
              "Grid Import (kW)","Grid Export (kW)","Note"]
@@ -838,7 +845,8 @@ if "df_result" in st.session_state:
     # ── HTML table builder ─────────────────────────────────────
     def _build_table_html(df, row_colors):
         col_widths = {
-            "Time": "140px", "Battery SOC (%)": "100px", "RE (kW)": "72px",
+            "Time": "140px", "Battery SOC (%)": "110px", "Battery Ah": "100px",
+            "RE (kW)": "72px",
             "Load (kW)": "72px", "Grid Available": "72px", "Tariff": "60px",
             "Rule No": "60px", "Load Source": "80px", "Batt Mode": "82px",
             "Grid Mode": "82px", "Load_out (kW)": "90px", "Batt_out (kW)": "90px",
@@ -868,6 +876,19 @@ if "df_result" in st.session_state:
                         f'width:100%;margin-bottom:2px;"><div style="background:{bar_color};'
                         f'width:{pct:.0f}%;height:10px;border-radius:4px;"></div></div>'
                         f'<span style="font-size:10px;">{val:.1f}%</span></td>'
+                    )
+                elif c == "Battery Ah":
+                    # Retrieve rated Ah from session state for the fill bar
+                    _rated = st.session_state.get("batt_ah_used", 200.0)
+                    ah_val = float(val)
+                    ah_pct = min(100.0, max(0.0, ah_val / _rated * 100.0)) if _rated > 0 else 0.0
+                    bar_color = "#4CAF50" if ah_pct >= 70 else "#FF9800" if ah_pct >= 30 else "#F44336"
+                    cells += (
+                        f'<td style="padding:5px 8px;font-size:12px;color:{fg};">'
+                        f'<div style="background:#ddd;border-radius:4px;height:10px;'
+                        f'width:100%;margin-bottom:2px;"><div style="background:{bar_color};'
+                        f'width:{ah_pct:.0f}%;height:10px;border-radius:4px;"></div></div>'
+                        f'<span style="font-size:10px;">{ah_val:.2f} Ah</span></td>'
                     )
                 else:
                     if isinstance(val, float):
