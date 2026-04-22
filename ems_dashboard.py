@@ -257,31 +257,113 @@ def _normalise_time(val):
         return s
 
 
+def _parse_timestamp(val):
+    """Convert a normalised time string to a pandas Timestamp (NaT-safe)."""
+    s = str(val).strip()
+    try:
+        return pd.to_datetime(s)
+    except Exception:
+        return pd.NaT
+
+
+def _interval_hours(ts_prev, ts_curr):
+    """Return the interval in hours between two Timestamps.
+
+    Falls back to 0.0 if either timestamp is NaT or parsing fails.
+    For time-only strings (HH:MM:SS) the difference is computed on a
+    common reference date so overnight wraps are handled gracefully.
+    """
+    if pd.isna(ts_prev) or pd.isna(ts_curr):
+        return 0.0
+    delta = ts_curr - ts_prev
+    hours = delta.total_seconds() / 3600.0
+    # Sanity-clamp: intervals > 24 h or negative are suspicious
+    if hours < 0:
+        hours += 24.0          # handle midnight wrap for HH:MM:SS data
+    return max(0.0, min(hours, 24.0))
+
+
 @st.cache_data
-def process_dataframe(df, rules):
+def process_dataframe(df, rules, batt_ah=200.0, batt_vnom=48.0, batt_eta=0.95, batt_soc0=None):
+    """Run EMS rule-matching and Coulomb-counting SOC simulation.
+
+    Coulomb-counting formula (per interval):
+        ΔAh  = P_bat_kW * 1000 / V_nom  *  Δt_h   (kW → A, then × hours → Ah)
+        Positive batt_kw  → charging  → SOC increases (×η)
+        Negative batt_kw  → discharging → SOC decreases (÷1, efficiency already in the
+                                           output power; we don't double-penalise)
+        SOC_new = clamp(SOC_prev + ΔAh / Ah_rated × 100,  0, 100)
+    """
+    rows_list = df.reset_index(drop=True)
+    n = len(rows_list)
+
+    # Pre-parse all timestamps for interval calculations
+    ts_parsed = []
+    for i in range(n):
+        ts_parsed.append(_parse_timestamp(_normalise_time(rows_list.loc[i, "Time"])))
+
+    # Initial SOC
+    if batt_soc0 is not None:
+        soc = float(batt_soc0)
+    else:
+        soc = float(rows_list.loc[0, "Battery SOC (%)"])
+    soc = max(0.0, min(100.0, soc))
+
     out = []
-    for _, row in df.iterrows():
-        ts  = _normalise_time(row["Time"])
-        soc = float(row["Battery SOC (%)"])
-        re  = float(row["RE (kW)"])
-        ld  = float(row["Load (kW)"])
-        ga  = int(row["Grid Available"])
-        tar = int(row["Tariff"])
+    for i in range(n):
+        row = rows_list.loc[i]
+        ts   = _normalise_time(row["Time"])
+        re   = float(row["RE (kW)"])
+        ld   = float(row["Load (kW)"])
+        ga   = int(row["Grid Available"])
+        tar  = int(row["Tariff"])
+
+        # ── Rule matching uses the running (Coulomb-counted) SOC ──
         t1,t2,t3,t4 = get_tod(ts)
         bl,bm,bh     = get_batt_range(soc)
-        re_f = 1 if re>=ld else 0
-        gth  = 1 if tar==1 else 0
-        gtl  = 1 if tar==0 else 0
-        src,bmode,gmode,rno,note = match_rule(re_f,bl,bm,bh,ga,gth,gtl,0,t1,t2,t3,t4,rules)
-        lv,bv,gv = compute_power(ld,re,src,bmode,gmode)
-        grid_import = round(max(0,  gv), 3)   # positive grid_out = importing
-        grid_export = round(max(0, -gv), 3)   # negative grid_out = exporting
-        out.append({"Time":ts,"Battery SOC (%)":soc,"RE (kW)":re,"Load (kW)":ld,
-                    "Grid Available":ga,"Tariff":tar,"Rule No":rno,
-                    "Load Source":src,"Batt Mode":bmode,"Grid Mode":gmode,
-                    "Load_out (kW)":lv,"Batt_out (kW)":bv,"Grid_out (kW)":gv,
-                    "Grid Import (kW)":grid_import,"Grid Export (kW)":grid_export,
-                    "Note":note})
+        re_f = 1 if re >= ld else 0
+        gth  = 1 if tar == 1 else 0
+        gtl  = 1 if tar == 0 else 0
+        src, bmode, gmode, rno, note = match_rule(
+            re_f, bl, bm, bh, ga, gth, gtl, 0, t1, t2, t3, t4, rules)
+        lv, bv, gv = compute_power(ld, re, src, bmode, gmode)
+
+        grid_import = round(max(0,  gv), 3)
+        grid_export = round(max(0, -gv), 3)
+
+        # ── Coulomb-counting SOC update ────────────────────────────
+        # Interval duration (hours)
+        if i == 0:
+            dt_h = 0.0
+        else:
+            dt_h = _interval_hours(ts_parsed[i - 1], ts_parsed[i])
+
+        # Battery current: P(kW) × 1000 / V_nom  → Amperes
+        i_bat = bv * 1000.0 / batt_vnom      # A  (+ = charging, − = discharging)
+        delta_ah = i_bat * dt_h              # Ah transferred this interval
+
+        if delta_ah >= 0:
+            # Charging: apply efficiency (η < 1 means less Ah actually stored)
+            soc_new = soc + (delta_ah * batt_eta) / batt_ah * 100.0
+        else:
+            # Discharging: no extra efficiency penalty here (P_bat already = output)
+            soc_new = soc + delta_ah / batt_ah * 100.0
+
+        soc_new = round(max(0.0, min(100.0, soc_new)), 2)
+        soc     = soc_new
+
+        out.append({
+            "Time": ts,
+            "Battery SOC (%)": soc,
+            "RE (kW)": re, "Load (kW)": ld,
+            "Grid Available": ga, "Tariff": tar,
+            "Rule No": rno,
+            "Load Source": src, "Batt Mode": bmode, "Grid Mode": gmode,
+            "Load_out (kW)": lv, "Batt_out (kW)": bv, "Grid_out (kW)": gv,
+            "Grid Import (kW)": grid_import, "Grid Export (kW)": grid_export,
+            "Note": note,
+        })
+
     return pd.DataFrame(out)
 
 
@@ -331,6 +413,33 @@ with st.sidebar:
     else:
         active_rules = _DEFAULT_RULES
         st.info(f"Using {len(_DEFAULT_RULES)} built-in default rules")
+
+    st.divider()
+
+    # ── Battery Parameters ─────────────────────────────────────
+    st.subheader("🔋 Battery Parameters")
+    st.caption("Used for Coulomb-counting SOC simulation.")
+    batt_ah = st.number_input(
+        "Rated Battery Capacity (Ah)",
+        min_value=1.0, max_value=100000.0, value=200.0, step=10.0,
+        help="Total usable Ah capacity of the battery bank (e.g. 200 Ah for a 200 Ah battery)."
+    )
+    batt_vnom = st.number_input(
+        "Nominal Battery Voltage (V)",
+        min_value=1.0, max_value=1500.0, value=48.0, step=1.0,
+        help="Nominal DC bus voltage of the battery (e.g. 48 V, 96 V, 120 V …)."
+    )
+    batt_eta = st.slider(
+        "Round-trip Efficiency η (%)",
+        min_value=50, max_value=100, value=95,
+        help="Charge/discharge round-trip efficiency. Applied to charging energy only."
+    ) / 100.0
+    batt_soc0 = st.number_input(
+        "Initial SOC (%)",
+        min_value=0.0, max_value=100.0, value=None, step=1.0,
+        placeholder="Leave blank → use first row value",
+        help="Starting SOC for Coulomb counting. If left blank, the first row's SOC column value is used."
+    )
 
     st.divider()
 
@@ -405,9 +514,19 @@ if should_run and can_run:
     if generate:
         process_dataframe.clear()
     with st.spinner("Running EMS logic…"):
-        st.session_state["df_result"]    = process_dataframe(df_input, active_rules)
-        st.session_state["rules_file"]   = rules_file
-        st.session_state["active_rules"] = active_rules
+        _soc0 = float(batt_soc0) if batt_soc0 is not None else None
+        st.session_state["df_result"]    = process_dataframe(
+            df_input, active_rules,
+            batt_ah=float(batt_ah),
+            batt_vnom=float(batt_vnom),
+            batt_eta=float(batt_eta),
+            batt_soc0=_soc0,
+        )
+        st.session_state["rules_file"]      = rules_file
+        st.session_state["active_rules"]    = active_rules
+        st.session_state["batt_ah_used"]    = float(batt_ah)
+        st.session_state["batt_vnom_used"]  = float(batt_vnom)
+        st.session_state["batt_eta_used"]   = float(batt_eta)
 
 if "df_result" in st.session_state:
     df_result    = st.session_state["df_result"]
@@ -418,6 +537,18 @@ if "df_result" in st.session_state:
     st.success(
         f"✅ Processed **{len(df_result)} rows** using **{rules_src} rules** "
         f"— **{df_result['Rule No'].nunique()}** unique rules fired"
+    )
+
+    # Battery parameter summary
+    _bah  = st.session_state.get("batt_ah_used",   200.0)
+    _bv   = st.session_state.get("batt_vnom_used",  48.0)
+    _beta = st.session_state.get("batt_eta_used",   0.95)
+    _bwh  = _bah * _bv / 1000.0
+    st.info(
+        f"🔋 **Coulomb-counting SOC** — Rated capacity: **{_bah:.0f} Ah** "
+        f"({_bwh:.1f} kWh @ {_bv:.0f} V)  |  "
+        f"Efficiency: **{_beta*100:.0f}%**  |  "
+        f"SOC is simulated forward from the initial value using measured battery power."
     )
 
     # KPIs
@@ -804,7 +935,7 @@ else:
 | Column | Description |
 |---|---|
 | `Time` | `HH:MM:SS` **or** `YYYY-MM-DD HH:MM(:SS)` — both formats accepted, full datetime recommended for multi-day / full-year data |
-| `Battery SOC (%)` | State of Charge 0–100 |
+| `Battery SOC (%)` | State of Charge 0–100 *(used as initial value for Coulomb counting)* |
 | `RE (kW)` | Solar + Wind generation |
 | `Load (kW)` | Site load demand |
 | `Grid Available` | 1 = available, 0 = outage |
