@@ -284,7 +284,7 @@ def _interval_hours(ts_prev, ts_curr):
 
 
 @st.cache_data
-def process_dataframe(df, rules, batt_ah=200.0, batt_vnom=48.0, batt_eta=0.95, batt_soc0=None):
+def process_dataframe(df, rules, batt_ah=5000.0, batt_vnom=48.0, batt_eta=0.95, batt_soc0=None):
     """Run EMS rule-matching and Coulomb-counting SOC simulation.
 
     Coulomb-counting formula (per interval):
